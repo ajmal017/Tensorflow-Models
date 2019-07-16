@@ -1,12 +1,5 @@
-import tensorflow as tf
-import tensorflow_datasets as tf
-
-
-import tensorflow as tf
-from PIL import Image
 
 import numpy as np
-
 import tensorflow as tf
 old_v = tf.logging.get_verbosity()
 tf.logging.set_verbosity(tf.logging.ERROR)
@@ -74,26 +67,49 @@ with tf.Session(config=config) as sess:
             
 ######################################################
 ######################################################
-def accuracy(predictions,labels):
-    return np.sum(np.argmax(predictions,axis=1)==np.argmax(labels,axis=1))*100/labels.shape[0]
 
-batch_size = 100
-layer_names = ['layer1','layer2','layer3','out']
-layer_sizes = [784,200,200,200,10]
+
+
+
+
+
+
+
+
+
+
+
+
+import tensorflow as tf
+import numpy as np
+import os
+from tensorflow.examples.tutorials.mnist import input_data
 
 tf.reset_default_graph()
 
+def accuracy(predictions,labels):
+    return np.sum(np.argmax(predictions,axis=1)==np.argmax(labels,axis=1))*100/labels.shape[0]
+############################################################################
+#make placeholders  and define inputs 
+############################################################################
+batch_size = 200
+layer_names = ['layer1','layer2','layer3','out']
+layer_sizes = [784,200,200,200,10]
+
 image_holder = tf.placeholder(tf.float32,shape=[batch_size,784],name='image_holder')
 label_holder = tf.placeholder(tf.float32,shape=[batch_size,10],name='train_labels')
-
+#############################################################################
+#define varibles
+#############################################################################
 for index,layer in enumerate(layer_names):
     with tf.variable_scope(layer):
         w=tf.get_variable('weights',shape=[layer_sizes[index],layer_sizes[index+1]]
                          ,initializer=tf.truncated_normal_initializer(stddev=0.05))
         b=tf.get_variable('bias',shape=[layer_sizes[index+1]],
                          initializer=tf.random_uniform_initializer(-.1,0.1))
-    
-
+############################################################################
+#make layers 
+############################################################################
 h = image_holder
 for layer in layer_names:
     with tf.variable_scope(layer,reuse=True):
@@ -102,79 +118,119 @@ for layer in layer_names:
             h = tf.nn.relu(tf.matmul(h,w)+b,name=layer+'_output')
         else:
             h = tf.nn.xw_plus_b(h,w,b,name=layer+'_output')
-            
+############################################################################
+#set optimizer, loss, gradients, 
+############################################################################
 predictions = tf.nn.softmax(h, name='predictions')
 loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(labels=label_holder, logits=h),name='loss')
-
-learning_rate = tf.placeholder(tf.float32,shape=None,name='learning_rate')
+learning_rate = .1
 optimizer = tf.train.GradientDescentOptimizer(learning_rate)
 gradient_vars = optimizer.compute_gradients(loss)
 loss_minimized = optimizer.minimize(loss)
 
+
+############################################################################
+#Summary data, accuracy, gradient summary
+############################################################################
 with tf.name_scope('performance'):
     loss_ph = tf.placeholder(tf.float32,shape=None,name='loss_summary')
     loss_summary = tf.summary.scalar('loss',loss_ph)
     accuracy_ph = tf.placeholder(tf.float32,shape=None,name='accuracy_summary')
     accuracy_summary = tf.summary.scalar('accuracy',accuracy_ph)
     
-for gradient,var in gradient_vars:
-    with tf.name_scope('gradients'):
-        last_grad_norm = tf.sqrt(tf.reduce_mean(gradient**2))
-        gradient_norm_summary = tf.summary.scalar('gradient_norm',last_grad_norm)
-        break
-performance_summaries = tf.summary.merge([
-    loss_summary,accuracy_summary])
+for g,var in gradient_vars:
+    if 'layer3' in var.name and 'weights' in var.name:
+        with tf.name_scope('gradients'):
+            last_grad_norm = tf.sqrt(tf.reduce_mean(g**2))
+            gradient_norm_summary = tf.summary.scalar('gradient_norm',last_grad_norm)
+            break
+performance_summaries = tf.summary.merge([loss_summary,accuracy_summary])
 
-import os
+all_summaries = []
+for layer in layer_names:
+    with tf.name_scope(layer+'_hist'):
+        with tf.variable_scope(layer,reuse=True):
+            w,b =tf.get_variable('weights'),tf.get_variable('bias')
+            tf_w_hist = tf.summary.histogram('weights_bias',tf.reshape(w,[-1]))
+            tf_b_hist = tf.summary.histogram('bias_hist',b)
+            all_summaries.extend([tf_w_hist,tf_b_hist])
 
+    tf_param_summaries = tf.summary.merge(all_summaries)
+############################################################################
+#set optimizer, loss, gradients, 
+############################################################################
 image_size = 28
 n_channels = 1
 n_classes = 10
 n_train = 55000
 n_valid = 5000
 n_test = 10000
-n_epochs = 1
-
+n_epochs = 10
+############################################################################
+#set gpu setting for config
+############################################################################
 config = tf.ConfigProto()
-config.gpu_options.allow_growth =True
-config.gpu_options.per_process_gpu_memory_fraction = 0.9
+config.gpu_options.allow_growth = True
+############################################################################
+#create interactive session and make file writer
+############################################################################
+with tf.Session(config=config) as session:
+    sum_dir = 'C:\Development\logs\MNIST_runs'
+    if not os.path.exists(sum_dir):
+        os.mkdir(sum_dir)
+    summary_writer = tf.summary.FileWriter(sum_dir,session.graph)
+    ############################################################################
+    #get data and init variables
+    ############################################################################
+    tf.global_variables_initializer().run()
 
-session = tf.InteractiveSession(config=config)
-sum_dir = 'C:\Development\logs\MNIST_runs'
-
-if not os.path.exists(sum_dir):
-    os.mkdir(sum_dir)
-
-summary_writer = tf.summary.FileWriter(sum_dir,session.graph)
-
-tf.global_variables_initializer().run()
-
-accuracy_per_epoch = []
-mnist_data = input_data.read_data_sets('MNIST_data',one_hot=True)
-
-#train the model
-for epoch in range(n_epochs):
-    for i in range(n_train//batch_size):
+    accuracy_per_epoch = []
+    mnist_data = input_data.read_data_sets('MNIST_data',one_hot=True)
+    ############################################################################
+    #Train the Model
+    ############################################################################
+    for epoch in range(n_epochs):
         loss_per_epoch = []
-        batch = mnist_data.train.next_batch(batch_size)
+        for i in range(n_train//batch_size):
+            batch = mnist_data.train.next_batch(batch_size)
+            if i ==0:
+                l,_,gn_summ,wb_summ = session.run([loss,loss_minimized,gradient_norm_summary,tf_param_summaries],
+                                          feed_dict={
+                                              image_holder:batch[0].reshape(batch_size,image_size*image_size),
+                                              label_holder:batch[1]
+                                          })
 
-        l ,_= session.run([loss,loss_minimized],feed_dict={
-            image_holder:batch[0].reshape(batch_size,image_size*image_size),
-            label_holder:batch[1],
-            learning_rate:.0001})
-        loss_per_epoch.append(l)
-    print('average loss in epoch {}: {}'.format(epoch,np.mean(loss_per_epoch)))
-    avg_loss = np.mean(loss_per_epoch)
 
-#calculate validation
-validation_accuracy_per_epoch = []
-for i in range(n_valid//batch_size):
-    valid_images, valid_labels = mnist_data.validation.next_batch(batch_size)
-    valid_batch_predictions = session.run(predictions,
-                                    feed_dict={image_holder:valid_images.reshape(batch_size,image_size*image_size)})
-validation_accuracy_per_epoch.append(accuracy(valid_batch_predictions,valid_labels))
-
-mean_v_acc = np.mean(validation_accuracy_per_epoch)
-print('average validation accuracy in epoch {}: {}'.format(epoch,np.mean(validation_accuracy_per_epoch)))
-    
-
+                summary_writer.add_summary(gn_summ, epoch)
+                summary_writer.add_summary(wb_summ,epoch)
+            else:
+                l,_= session.run([loss,loss_minimized],feed_dict={
+                    image_holder:batch[0].reshape(batch_size,image_size*image_size),
+                    label_holder:batch[1]})
+            loss_per_epoch.append(l)
+        print('average loss in epoch {}: {}'.format(epoch,np.mean(loss_per_epoch)))
+        avg_loss = np.mean(loss_per_epoch)
+        ############################################################################
+        #Validate Model
+        ############################################################################
+        validation_accuracy_per_epoch = []
+        for i in range(n_valid//batch_size):
+            valid_images, valid_labels = mnist_data.validation.next_batch(batch_size)
+            valid_batch_predictions = session.run(predictions,
+                                            feed_dict={image_holder:valid_images.reshape(batch_size,image_size*image_size)})
+            validation_accuracy_per_epoch.append(accuracy(valid_batch_predictions,valid_labels))
+        mean_v_acc = np.mean(validation_accuracy_per_epoch)
+        print('average validation accuracy in epoch {} is {}%'.format(epoch,np.mean(validation_accuracy_per_epoch)))
+        ############################################################################
+        #Test Accuracy
+        ############################################################################
+        accuracy_per_epoch = []
+        for i in range(n_test//batch_size):
+            test_image, test_labels = mnist_data.test.next_batch(batch_size)
+            test_batch_predictions = session.run(predictions,feed_dict={image_holder:test_image,label_holder:test_labels})
+            accuracy_per_epoch.append(accuracy(test_batch_predictions,test_labels))
+        print("average test accuracy in epoch {} is {}".format(epoch,np.mean(accuracy_per_epoch)))
+        avg_test_accuracy = np.mean(accuracy_per_epoch)
+        summary = session.run(performance_summaries,feed_dict={loss_ph:avg_loss,accuracy_ph:avg_test_accuracy})
+        summary_writer.add_summary(summary,epoch)
+    summary_writer.close()
