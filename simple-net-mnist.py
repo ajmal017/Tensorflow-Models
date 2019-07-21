@@ -234,3 +234,6 @@ with tf.Session(config=config) as session:
         summary = session.run(performance_summaries,feed_dict={loss_ph:avg_loss,accuracy_ph:avg_test_accuracy})
         summary_writer.add_summary(summary,epoch)
     summary_writer.close()
+
+
+
