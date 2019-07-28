@@ -43,7 +43,7 @@ import tensorflow as tf
 epochs = [1]
 convo_layers = [3]
 dense_layers = [0]
-
+ 
 
 for epoch in epochs:
     for convo in convo_layers:
